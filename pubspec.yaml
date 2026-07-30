@@ -1,0 +1,29 @@
+name: slipper_radius
+description: 한림대 학생 전용, 광고 없는 대학가 맛집·술집·카페 앱
+publish_to: 'none'
+version: 0.1.0
+
+environment:
+  sdk: '>=3.0.0 <4.0.0'
+
+dependencies:
+  flutter:
+    sdk: flutter
+
+  firebase_core: ^3.6.0
+  firebase_auth: ^5.3.1
+  cloud_firestore: ^5.4.4
+  google_fonts: ^6.2.1
+  http: ^1.2.2
+  url_launcher: ^6.3.1
+  geolocator: ^13.0.1
+  flutter_map: ^7.0.2
+  latlong2: ^0.9.1
+  shared_preferences: ^2.3.2
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+
+flutter:
+  uses-material-design: true

@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "804846851803",
+    "project_id": "hallym-c034f",
+    "storage_bucket": "hallym-c034f.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:804846851803:android:d16283e7f8fd16bcfd5efe",
+        "android_client_info": {
+          "package_name": "com.example.flutter_application_1"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyAIUF3wOl0QRjmkwuCY-7iBWpSVbeGZGdk"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
