@@ -284,6 +284,7 @@ class Place {
   final double? latitude;
   final double? longitude;
   final String? createdBy;
+  final String? benefit; // 제휴업체 혜택 (예: 학생증 제시 시 10% 할인)
 
   Place({
     required this.id,
@@ -300,6 +301,7 @@ class Place {
     this.latitude,
     this.longitude,
     this.createdBy,
+    this.benefit,
   });
 
   double get tasteAvg => tasteCount == 0 ? 0 : tasteSum / tasteCount;
@@ -323,6 +325,7 @@ class Place {
       latitude: (d['latitude'] as num?)?.toDouble(),
       longitude: (d['longitude'] as num?)?.toDouble(),
       createdBy: d['createdBy'],
+      benefit: d['benefit'],
     );
   }
 }
@@ -549,15 +552,8 @@ class _MainShellState extends State<MainShell> {
     );
     if (category == null || !mounted) return;
 
-    String? college;
-    if (category == '제휴업체') {
-      college = await Navigator.of(context).push<String>(
-          MaterialPageRoute(builder: (_) => const CollegePickerScreen()));
-      if (college == null || !mounted) return;
-    }
-    Navigator.of(context).push(MaterialPageRoute(
-        builder: (_) =>
-            AddPlaceScreen(category: category, initialCollege: college)));
+    Navigator.of(context).push(
+        MaterialPageRoute(builder: (_) => AddPlaceScreen(category: category)));
   }
 
   void _goToTab(int i) {
@@ -1091,15 +1087,6 @@ class _CategoryButton extends StatelessWidget {
   const _CategoryButton({required this.category});
 
   Future<void> _onTap(BuildContext context) async {
-    if (category == '제휴업체') {
-      final college = await Navigator.of(context).push<String>(
-          MaterialPageRoute(builder: (_) => const CollegePickerScreen()));
-      if (college == null || !context.mounted) return;
-      Navigator.of(context).push(MaterialPageRoute(
-          builder: (_) =>
-              CategoryScreen(category: category, college: college)));
-      return;
-    }
     Navigator.of(context).push(
         MaterialPageRoute(builder: (_) => CategoryScreen(category: category)));
   }
@@ -1570,6 +1557,24 @@ class _PlaceCard extends StatelessWidget {
                       ],
                     ),
                   ],
+                  if (place.benefit != null && place.benefit!.isNotEmpty) ...[
+                    const SizedBox(height: 4),
+                    Row(
+                      children: [
+                        const Icon(Icons.card_giftcard,
+                            size: 13, color: Color(0xFFC98A2C)),
+                        const SizedBox(width: 3),
+                        Expanded(
+                          child: Text(place.benefit!,
+                              overflow: TextOverflow.ellipsis,
+                              style: T.body(
+                                  size: 12,
+                                  w: FontWeight.w700,
+                                  color: const Color(0xFFC98A2C))),
+                        ),
+                      ],
+                    ),
+                  ],
                   if (place.tags.isNotEmpty) ...[
                     const SizedBox(height: 6),
                     Wrap(
@@ -1677,17 +1682,39 @@ class PlaceDetailScreen extends StatelessWidget {
               ],
             ),
           ),
-          if (place.college != null && place.college!.isNotEmpty)
+          if (place.benefit != null && place.benefit!.isNotEmpty)
             Padding(
-              padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
-              child: Row(
-                children: [
-                  const Icon(Icons.school_outlined,
-                      size: 16, color: AppColors.inkFaint),
-                  const SizedBox(width: 6),
-                  Text(place.college!,
-                      style: T.body(size: 13, color: AppColors.inkFaint)),
-                ],
+              padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
+              child: Container(
+                width: double.infinity,
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                decoration: BoxDecoration(
+                    color: const Color(0xFFFFF4CC),
+                    borderRadius: BorderRadius.circular(12)),
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Icon(Icons.card_giftcard,
+                        size: 18, color: Color(0xFFC98A2C)),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text('제휴 혜택',
+                              style: T.body(
+                                  size: 12,
+                                  w: FontWeight.w800,
+                                  color: const Color(0xFFC98A2C))),
+                          const SizedBox(height: 2),
+                          Text(place.benefit!,
+                              style: T.body(size: 13, color: AppColors.ink)),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
               ),
             ),
           if (place.address != null && place.address!.isNotEmpty)
@@ -2369,6 +2396,8 @@ class _EditPlaceScreenState extends State<EditPlaceScreen> {
       TextEditingController(text: widget.place.naverMapUrl ?? '');
   late final _addressController =
       TextEditingController(text: widget.place.address ?? '');
+  late final _benefitController =
+      TextEditingController(text: widget.place.benefit ?? '');
   late String _category = widget.place.category;
   late String? _college = widget.place.college;
   late double? _lat = widget.place.latitude;
@@ -2454,12 +2483,6 @@ class _EditPlaceScreenState extends State<EditPlaceScreen> {
     }
   }
 
-  Future<void> _pickCollege() async {
-    final college = await Navigator.of(context).push<String>(
-        MaterialPageRoute(builder: (_) => const CollegePickerScreen()));
-    if (college != null) setState(() => _college = college);
-  }
-
   Future<void> _pickOnMap() async {
     final picked = await Navigator.of(context).push<latlong.LatLng>(
         MaterialPageRoute(
@@ -2480,9 +2503,9 @@ class _EditPlaceScreenState extends State<EditPlaceScreen> {
 
   Future<void> _save() async {
     if (_nameController.text.trim().isEmpty) return;
-    if (_category == '제휴업체' && _college == null) {
+    if (_category == '제휴업체' && _benefitController.text.trim().isEmpty) {
       ScaffoldMessenger.of(context)
-          .showSnackBar(const SnackBar(content: Text('단과대학을 선택해주세요')));
+          .showSnackBar(const SnackBar(content: Text('제휴 혜택을 입력해주세요')));
       return;
     }
     setState(() => _saving = true);
@@ -2494,7 +2517,8 @@ class _EditPlaceScreenState extends State<EditPlaceScreen> {
         'name': _nameController.text.trim(),
         'nameNormalized': normalizeName(_nameController.text.trim()),
         'category': _category,
-        'college': _category == '제휴업체' ? _college : null,
+        'college': null, // 제휴업체는 학교 전체 공통 — 단과대 구분 없음
+        'benefit': _category == '제휴업체' ? _benefitController.text.trim() : null,
         'tags': _selectedTags.toList(),
         'naverMapUrl': _mapUrlController.text.trim().isEmpty
             ? null
@@ -2534,41 +2558,19 @@ class _EditPlaceScreenState extends State<EditPlaceScreen> {
             }),
             decoration: const InputDecoration(labelText: '카테고리'),
           ),
-          if (_category == '제휴업체') ...[
-            const SizedBox(height: 14),
-            InkWell(
-              borderRadius: BorderRadius.circular(12),
-              onTap: _pickCollege,
-              child: Container(
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
-                decoration: BoxDecoration(
-                    color: AppColors.surfaceMuted,
-                    borderRadius: BorderRadius.circular(12)),
-                child: Row(
-                  children: [
-                    const Icon(Icons.school_outlined,
-                        size: 18, color: AppColors.inkFaint),
-                    const SizedBox(width: 8),
-                    Text(_college ?? '단과대학 선택 (필수)',
-                        style: T.body(
-                            size: 14,
-                            color: _college == null
-                                ? AppColors.inkFaint
-                                : AppColors.ink,
-                            w: FontWeight.w700)),
-                    const Spacer(),
-                    const Icon(Icons.chevron_right,
-                        size: 18, color: AppColors.inkFaint),
-                  ],
-                ),
-              ),
-            ),
-          ],
           const SizedBox(height: 14),
           TextField(
               controller: _nameController,
               decoration: const InputDecoration(labelText: '가게 이름')),
+          if (_category == '제휴업체') ...[
+            const SizedBox(height: 14),
+            TextField(
+                controller: _benefitController,
+                maxLines: 2,
+                decoration: const InputDecoration(
+                    labelText: '제휴 혜택 (필수)',
+                    hintText: '예: 학생증 제시 시 10% 할인 / 음료 1잔 서비스')),
+          ],
           const SizedBox(height: 14),
           TextField(
               controller: _mapUrlController,
@@ -2767,6 +2769,7 @@ class _AddPlaceScreenState extends State<AddPlaceScreen> {
   final _commentController = TextEditingController();
   final _mapUrlController = TextEditingController();
   final _addressController = TextEditingController();
+  final _benefitController = TextEditingController();
   late String _category = widget.category;
   late String? _college = widget.initialCollege;
   double _taste = 4;
@@ -2838,12 +2841,6 @@ class _AddPlaceScreenState extends State<AddPlaceScreen> {
     }
   }
 
-  Future<void> _pickCollege() async {
-    final college = await Navigator.of(context).push<String>(
-        MaterialPageRoute(builder: (_) => const CollegePickerScreen()));
-    if (college != null) setState(() => _college = college);
-  }
-
   Future<void> _pickOnMap() async {
     final picked = await Navigator.of(context).push<latlong.LatLng>(
         MaterialPageRoute(
@@ -2885,9 +2882,9 @@ class _AddPlaceScreenState extends State<AddPlaceScreen> {
 
   Future<void> _save() async {
     if (_nameController.text.trim().isEmpty) return;
-    if (_category == '제휴업체' && _college == null) {
+    if (_category == '제휴업체' && _benefitController.text.trim().isEmpty) {
       ScaffoldMessenger.of(context)
-          .showSnackBar(const SnackBar(content: Text('단과대학을 선택해주세요')));
+          .showSnackBar(const SnackBar(content: Text('제휴 혜택을 입력해주세요')));
       return;
     }
     final trimmedName = _nameController.text.trim();
@@ -2936,7 +2933,8 @@ class _AddPlaceScreenState extends State<AddPlaceScreen> {
         'name': trimmedName,
         'nameNormalized': normalized,
         'category': _category,
-        'college': _category == '제휴업체' ? _college : null,
+        'college': null, // 제휴업체는 학교 전체 공통 — 단과대 구분 없음
+        'benefit': _category == '제휴업체' ? _benefitController.text.trim() : null,
         'tags': _selectedTags.toList(),
         'tasteSum': _taste,
         'tasteCount': 1,
@@ -2991,41 +2989,19 @@ class _AddPlaceScreenState extends State<AddPlaceScreen> {
             }),
             decoration: const InputDecoration(labelText: '카테고리'),
           ),
-          if (_category == '제휴업체') ...[
-            const SizedBox(height: 14),
-            InkWell(
-              borderRadius: BorderRadius.circular(12),
-              onTap: _pickCollege,
-              child: Container(
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
-                decoration: BoxDecoration(
-                    color: AppColors.surfaceMuted,
-                    borderRadius: BorderRadius.circular(12)),
-                child: Row(
-                  children: [
-                    const Icon(Icons.school_outlined,
-                        size: 18, color: AppColors.inkFaint),
-                    const SizedBox(width: 8),
-                    Text(_college ?? '단과대학 선택 (필수)',
-                        style: T.body(
-                            size: 14,
-                            color: _college == null
-                                ? AppColors.inkFaint
-                                : AppColors.ink,
-                            w: FontWeight.w700)),
-                    const Spacer(),
-                    const Icon(Icons.chevron_right,
-                        size: 18, color: AppColors.inkFaint),
-                  ],
-                ),
-              ),
-            ),
-          ],
           const SizedBox(height: 14),
           TextField(
               controller: _nameController,
               decoration: const InputDecoration(labelText: '가게 이름')),
+          if (_category == '제휴업체') ...[
+            const SizedBox(height: 14),
+            TextField(
+                controller: _benefitController,
+                maxLines: 2,
+                decoration: const InputDecoration(
+                    labelText: '제휴 혜택 (필수)',
+                    hintText: '예: 학생증 제시 시 10% 할인 / 음료 1잔 서비스')),
+          ],
           const SizedBox(height: 14),
           TextField(
             controller: _mapUrlController,
@@ -3528,15 +3504,15 @@ class _AuthScreenState extends State<AuthScreen> {
                 text: TextSpan(
                   style: T.heading(size: 27),
                   children: [
-                    const TextSpan(text: '아그들아..\n'),
+                    const TextSpan(text: '먹고 싶다면\n'),
                     TextSpan(
-                        text: '밥은 굶고 다니지 말자',
+                        text: '여기서 찾아요',
                         style: T.heading(size: 27, color: AppColors.coral)),
                   ],
                 ),
               ),
               const SizedBox(height: 8),
-              Text('광고 없습니다~',
+              Text('한림대 주변 맛집 정보를 한눈에',
                   style: T.body(size: 13, color: AppColors.inkFaint)),
               const SizedBox(height: 28),
               Row(
