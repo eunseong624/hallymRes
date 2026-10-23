@@ -58,12 +58,6 @@ class AppColors {
 
   static const Color gold = Color(0xFFFFB300);
   static const Color stamp = Color(0xFFE5484D);
-
-  static const gradient = LinearGradient(
-    begin: Alignment.topLeft,
-    end: Alignment.bottomRight,
-    colors: [coral, coral],
-  );
 }
 
 class T {
@@ -241,6 +235,7 @@ class RootGate extends StatefulWidget {
 
 class _RootGateState extends State<RootGate> {
   bool _guestMode = false;
+  int _tab = 0; // 로그인/로그아웃으로 화면이 새로 만들어져도 보던 탭 유지
 
   @override
   Widget build(BuildContext context) {
@@ -255,7 +250,16 @@ class _RootGateState extends State<RootGate> {
                       CircularProgressIndicator(color: AppColors.gradientEnd)));
         }
         final loggedIn = snapshot.data != null;
-        if (loggedIn || _guestMode) return const MainShell();
+        if (loggedIn || _guestMode) {
+          // 계정이 바뀌면(비회원→로그인, 로그아웃 등) key가 바뀌어 메인 화면을 새로 만듦
+          // → 마이페이지·즐겨찾기·알림이 바뀐 로그인 상태를 바로 반영
+          return MainShell(
+            key: ValueKey(snapshot.data?.uid ?? 'guest'),
+            initialIndex: _tab,
+            onTabChanged: (i) => _tab = i,
+          );
+        }
+        _tab = 0;
         return AuthScreen(onGuest: () => setState(() => _guestMode = true));
       },
     );
@@ -269,6 +273,7 @@ class Place {
   final String id;
   final String name;
   final String category;
+  final String? college; // 제휴업체일 때만 사용 — 소속 단과대학
   final double tasteSum;
   final int tasteCount;
   final double valueSum;
@@ -284,6 +289,7 @@ class Place {
     required this.id,
     required this.name,
     required this.category,
+    this.college,
     required this.tasteSum,
     required this.tasteCount,
     required this.valueSum,
@@ -306,6 +312,7 @@ class Place {
       id: doc.id,
       name: d['name'] ?? '',
       category: d['category'] ?? '한식',
+      college: d['college'],
       tasteSum: (d['tasteSum'] ?? 0).toDouble(),
       tasteCount: (d['tasteCount'] ?? 0),
       valueSum: (d['valueSum'] ?? 0).toDouble(),
@@ -324,7 +331,8 @@ class Place {
 Future<latlong.LatLng?> geocodeAddress(String address) async {
   final query = Uri.encodeComponent('$address, 대한민국');
   final uri = Uri.parse(
-      'https://nominatim.openstreetmap.org/search?q=$query&format=json&limit=1&countrycodes=kr');
+      'https://nominatim.openstreetmap.org/search?q=$query&format=json&limit=1&countrycodes=kr'
+      '&viewbox=127.55,38.05,127.95,37.75&bounded=1'); // 춘천 범위 밖 결과는 무시
   try {
     final res =
         await http.get(uri, headers: {'User-Agent': 'hallym-meokjagolmok-app'});
@@ -407,6 +415,23 @@ const kCategories = [
   '제휴업체'
 ];
 
+/// 한림대학교 단과대학 목록 (2026 개편 기준, 제휴업체 카테고리 필터용)
+const kColleges = [
+  '인문대학',
+  '사회과학대학',
+  '경영대학',
+  '자연과학대학',
+  '의과대학',
+  '간호대학',
+  '글로벌융합대학',
+  '미디어스쿨',
+  '반도체·디스플레이스쿨',
+  '정보과학대학',
+  '미래융합스쿨',
+  '산학협력특성화대학',
+  '일송자유교양대학',
+];
+
 /// 띄어쓰기·특수문자·대소문자를 무시하고 이름을 비교하기 위한 정규화
 String normalizeName(String s) =>
     s.replaceAll(RegExp(r'[\s·\-_.,]'), '').toLowerCase();
@@ -441,17 +466,53 @@ const Map<String, CategoryStyle> kCategoryStyles = {
 };
 
 /// ============================================================
+/// 단과대학 선택 화면 (제휴업체 카테고리 전용)
+/// ============================================================
+class CollegePickerScreen extends StatelessWidget {
+  final String title;
+  const CollegePickerScreen({super.key, this.title = '단과대학 선택'});
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(
+        title: Text(title),
+        backgroundColor: AppColors.background,
+        elevation: 0,
+        foregroundColor: AppColors.ink,
+      ),
+      body: ListView.separated(
+        padding: const EdgeInsets.symmetric(vertical: 8),
+        itemCount: kColleges.length,
+        separatorBuilder: (_, __) => const Divider(height: 1),
+        itemBuilder: (context, i) {
+          final college = kColleges[i];
+          return ListTile(
+            title: Text(college, style: T.body(size: 15, w: FontWeight.w600)),
+            trailing:
+                const Icon(Icons.chevron_right, color: AppColors.inkFaint),
+            onTap: () => Navigator.of(context).pop(college),
+          );
+        },
+      ),
+    );
+  }
+}
+
+/// ============================================================
 /// 메인 셸 — 하단 탭바(홈/검색/등록/즐겨찾기/마이페이지)
 /// ============================================================
 class MainShell extends StatefulWidget {
-  const MainShell({super.key});
+  final int initialIndex;
+  final ValueChanged<int>? onTabChanged;
+  const MainShell({super.key, this.initialIndex = 0, this.onTabChanged});
 
   @override
   State<MainShell> createState() => _MainShellState();
 }
 
 class _MainShellState extends State<MainShell> {
-  int _index = 0;
+  late int _index = widget.initialIndex;
 
   Future<void> _onRegisterTap() async {
     if (FirebaseAuth.instance.currentUser == null) {
@@ -487,11 +548,22 @@ class _MainShellState extends State<MainShell> {
       builder: (_) => const _CategoryPickerSheet(),
     );
     if (category == null || !mounted) return;
-    Navigator.of(context).push(
-        MaterialPageRoute(builder: (_) => AddPlaceScreen(category: category)));
+
+    String? college;
+    if (category == '제휴업체') {
+      college = await Navigator.of(context).push<String>(
+          MaterialPageRoute(builder: (_) => const CollegePickerScreen()));
+      if (college == null || !mounted) return;
+    }
+    Navigator.of(context).push(MaterialPageRoute(
+        builder: (_) =>
+            AddPlaceScreen(category: category, initialCollege: college)));
   }
 
-  void _goToTab(int i) => setState(() => _index = i);
+  void _goToTab(int i) {
+    setState(() => _index = i);
+    widget.onTabChanged?.call(i);
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -564,7 +636,7 @@ class _BottomBar extends StatelessWidget {
                 width: 50,
                 height: 50,
                 decoration: BoxDecoration(
-                  gradient: AppColors.gradient,
+                  color: AppColors.gradientEnd,
                   shape: BoxShape.circle,
                   boxShadow: softShadow(AppColors.gradientEnd,
                       opacity: 0.35, blur: 14, dy: 4),
@@ -827,6 +899,27 @@ class _RoundIconButton extends StatelessWidget {
 /// 한림대학교 좌표 (출처: Wikidata) — 등록된 곳이 없을 때 기본 중심점
 const latlong.LatLng kDefaultMapCenter = latlong.LatLng(37.8861, 127.7383);
 
+/// '가까운순' 정렬과 거리 표시의 기준점 (한림대학교 정문, 구글 플러스코드 8Q99VPMQ+94X)
+const latlong.LatLng kSchoolPoint = latlong.LatLng(37.883488, 127.737859);
+final _distanceCalc = latlong.Distance();
+
+/// 한림대 정문에서 가게까지 직선거리(m). 위치가 없는 가게는 null
+double? distanceFromSchool(Place p) {
+  if (p.latitude == null || p.longitude == null) return null;
+  return _distanceCalc.as(latlong.LengthUnit.Meter, kSchoolPoint,
+      latlong.LatLng(p.latitude!, p.longitude!));
+}
+
+/// 예: '정문에서 350m · 도보 약 6분'
+/// 도보 시간은 직선거리에 골목 우회분(1.3배)을 더해 분당 67m(시속 4km)로 계산
+String formatDistanceFromSchool(double meters) {
+  final dist = meters < 1000
+      ? '${(meters / 10).round() * 10}m'
+      : '${(meters / 1000).toStringAsFixed(1)}km';
+  final walkMin = (meters * 1.3 / 67).ceil().clamp(1, 999);
+  return '정문에서 $dist · 도보 약 $walkMin분';
+}
+
 class _PlacesMapCard extends StatelessWidget {
   const _PlacesMapCard();
 
@@ -997,13 +1090,26 @@ class _CategoryButton extends StatelessWidget {
   final String category;
   const _CategoryButton({required this.category});
 
+  Future<void> _onTap(BuildContext context) async {
+    if (category == '제휴업체') {
+      final college = await Navigator.of(context).push<String>(
+          MaterialPageRoute(builder: (_) => const CollegePickerScreen()));
+      if (college == null || !context.mounted) return;
+      Navigator.of(context).push(MaterialPageRoute(
+          builder: (_) =>
+              CategoryScreen(category: category, college: college)));
+      return;
+    }
+    Navigator.of(context).push(
+        MaterialPageRoute(builder: (_) => CategoryScreen(category: category)));
+  }
+
   @override
   Widget build(BuildContext context) {
     final style = kCategoryStyles[category]!;
     return InkWell(
       borderRadius: BorderRadius.circular(14),
-      onTap: () => Navigator.of(context).push(MaterialPageRoute(
-          builder: (_) => CategoryScreen(category: category))),
+      onTap: () => _onTap(context),
       child: Container(
         padding: const EdgeInsets.all(9),
         decoration: BoxDecoration(
@@ -1133,7 +1239,8 @@ const _sortLabels = {
 
 class CategoryScreen extends StatefulWidget {
   final String category;
-  const CategoryScreen({super.key, required this.category});
+  final String? college; // 제휴업체일 때만 사용되는 단과대학 필터
+  const CategoryScreen({super.key, required this.category, this.college});
 
   @override
   State<CategoryScreen> createState() => _CategoryScreenState();
@@ -1169,14 +1276,25 @@ class _CategoryScreenState extends State<CategoryScreen> {
     }
     if (!mounted) return;
     Navigator.of(context).push(MaterialPageRoute(
-        builder: (_) => AddPlaceScreen(category: widget.category)));
+        builder: (_) => AddPlaceScreen(
+            category: widget.category, initialCollege: widget.college)));
   }
 
   List<Place> _applySort(List<Place> places) {
     final list = [...places];
     switch (_sort) {
       case SortType.all:
+        break;
       case SortType.near:
+        // 위치가 등록 안 된 가게는 맨 뒤로
+        list.sort((a, b) {
+          final da = distanceFromSchool(a);
+          final db = distanceFromSchool(b);
+          if (da == null && db == null) return 0;
+          if (da == null) return 1;
+          if (db == null) return -1;
+          return da.compareTo(db);
+        });
         break;
       case SortType.rating:
         list.sort((a, b) => b.tasteAvg.compareTo(a.tasteAvg));
@@ -1194,9 +1312,12 @@ class _CategoryScreenState extends State<CategoryScreen> {
   @override
   Widget build(BuildContext context) {
     final style = kCategoryStyles[widget.category]!;
-    final query = FirebaseFirestore.instance
+    Query<Map<String, dynamic>> query = FirebaseFirestore.instance
         .collection('places')
         .where('category', isEqualTo: widget.category);
+    if (widget.college != null) {
+      query = query.where('college', isEqualTo: widget.college);
+    }
 
     return Scaffold(
       body: CustomScrollView(
@@ -1234,7 +1355,11 @@ class _CategoryScreenState extends State<CategoryScreen> {
                       Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          Text(widget.category, style: T.heading(size: 19)),
+                          Text(
+                              widget.college != null
+                                  ? '${widget.category} · ${widget.college}'
+                                  : widget.category,
+                              style: T.heading(size: 19)),
                           Text(style.subtitle,
                               style:
                                   T.body(size: 12, color: AppColors.inkFaint)),
@@ -1431,6 +1556,20 @@ class _PlaceCard extends StatelessWidget {
                           style: T.body(size: 12, color: AppColors.inkFaint)),
                     ],
                   ),
+                  if (distanceFromSchool(place) != null) ...[
+                    const SizedBox(height: 4),
+                    Row(
+                      children: [
+                        const Icon(Icons.place_outlined,
+                            size: 13, color: AppColors.inkFaint),
+                        const SizedBox(width: 3),
+                        Text(
+                            formatDistanceFromSchool(
+                                distanceFromSchool(place)!),
+                            style: T.body(size: 12, color: AppColors.inkFaint)),
+                      ],
+                    ),
+                  ],
                   if (place.tags.isNotEmpty) ...[
                     const SizedBox(height: 6),
                     Wrap(
@@ -1538,6 +1677,19 @@ class PlaceDetailScreen extends StatelessWidget {
               ],
             ),
           ),
+          if (place.college != null && place.college!.isNotEmpty)
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+              child: Row(
+                children: [
+                  const Icon(Icons.school_outlined,
+                      size: 16, color: AppColors.inkFaint),
+                  const SizedBox(width: 6),
+                  Text(place.college!,
+                      style: T.body(size: 13, color: AppColors.inkFaint)),
+                ],
+              ),
+            ),
           if (place.address != null && place.address!.isNotEmpty)
             Padding(
               padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
@@ -2044,8 +2196,12 @@ class _FullMapScreenState extends State<FullMapScreen> {
                 options: MapOptions(
                   initialCenter: kDefaultMapCenter,
                   initialZoom: 15,
-                  interactionOptions:
-                      const InteractionOptions(flags: InteractiveFlag.all),
+                  interactionOptions: const InteractionOptions(
+                    flags: InteractiveFlag.drag |
+                        InteractiveFlag.pinchZoom |
+                        InteractiveFlag.doubleTapZoom |
+                        InteractiveFlag.flingAnimation,
+                  ),
                 ),
                 children: [
                   TileLayer(
@@ -2067,6 +2223,103 @@ class _FullMapScreenState extends State<FullMapScreen> {
                 const SizedBox(height: 8),
                 _ZoomButton(icon: Icons.remove, onTap: () => _zoom(-1)),
               ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// 지도를 움직여 가운데 핀 위치를 고르는 화면 — 선택한 좌표를 pop으로 돌려줌
+class MapPickerScreen extends StatefulWidget {
+  final latlong.LatLng? initial;
+  const MapPickerScreen({super.key, this.initial});
+
+  @override
+  State<MapPickerScreen> createState() => _MapPickerScreenState();
+}
+
+class _MapPickerScreenState extends State<MapPickerScreen> {
+  final MapController _mapController = MapController();
+
+  void _zoom(double delta) {
+    final camera = _mapController.camera;
+    _mapController.move(camera.center, (camera.zoom + delta).clamp(3, 19));
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(
+          title: const Text('지도에서 위치 고르기'),
+          backgroundColor: Colors.white,
+          elevation: 0,
+          foregroundColor: AppColors.ink),
+      body: Stack(
+        children: [
+          FlutterMap(
+            mapController: _mapController,
+            options: MapOptions(
+              initialCenter: widget.initial ?? kDefaultMapCenter,
+              initialZoom: 17,
+              interactionOptions: const InteractionOptions(
+                flags: InteractiveFlag.drag |
+                    InteractiveFlag.pinchZoom |
+                    InteractiveFlag.doubleTapZoom |
+                    InteractiveFlag.flingAnimation,
+              ),
+            ),
+            children: [
+              TileLayer(
+                urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+                userAgentPackageName: 'com.hallym.meokjagolmok',
+              ),
+            ],
+          ),
+          // 화면 가운데 고정 핀 (핀 끝이 정중앙에 오도록 위로 살짝 올림)
+          const IgnorePointer(
+            child: Center(
+              child: Padding(
+                padding: EdgeInsets.only(bottom: 40),
+                child:
+                    Icon(Icons.location_on, size: 44, color: AppColors.stamp),
+              ),
+            ),
+          ),
+          Positioned(
+            top: 12,
+            left: 16,
+            right: 16,
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+              decoration: BoxDecoration(
+                  color: Colors.white,
+                  borderRadius: BorderRadius.circular(10),
+                  border: Border.all(color: AppColors.divider)),
+              child: Text('지도를 움직여서 핀을 가게 위치에 맞춰주세요',
+                  textAlign: TextAlign.center, style: T.body(size: 13)),
+            ),
+          ),
+          Positioned(
+            right: 16,
+            bottom: 100,
+            child: Column(
+              children: [
+                _ZoomButton(icon: Icons.add, onTap: () => _zoom(1)),
+                const SizedBox(height: 8),
+                _ZoomButton(icon: Icons.remove, onTap: () => _zoom(-1)),
+              ],
+            ),
+          ),
+          Positioned(
+            left: 16,
+            right: 16,
+            bottom: 24,
+            child: ElevatedButton(
+              onPressed: () =>
+                  Navigator.of(context).pop(_mapController.camera.center),
+              child: const Text('이 위치로 설정'),
             ),
           ),
         ],
@@ -2117,6 +2370,7 @@ class _EditPlaceScreenState extends State<EditPlaceScreen> {
   late final _addressController =
       TextEditingController(text: widget.place.address ?? '');
   late String _category = widget.place.category;
+  late String? _college = widget.place.college;
   late double? _lat = widget.place.latitude;
   late double? _lng = widget.place.longitude;
   late Set<String> _selectedTags = {...widget.place.tags};
@@ -2200,8 +2454,37 @@ class _EditPlaceScreenState extends State<EditPlaceScreen> {
     }
   }
 
+  Future<void> _pickCollege() async {
+    final college = await Navigator.of(context).push<String>(
+        MaterialPageRoute(builder: (_) => const CollegePickerScreen()));
+    if (college != null) setState(() => _college = college);
+  }
+
+  Future<void> _pickOnMap() async {
+    final picked = await Navigator.of(context).push<latlong.LatLng>(
+        MaterialPageRoute(
+            builder: (_) => MapPickerScreen(
+                initial: _lat != null && _lng != null
+                    ? latlong.LatLng(_lat!, _lng!)
+                    : null)));
+    if (picked == null) return;
+    setState(() {
+      _lat = picked.latitude;
+      _lng = picked.longitude;
+    });
+    if (mounted) {
+      ScaffoldMessenger.of(context)
+          .showSnackBar(const SnackBar(content: Text('지도에서 고른 위치로 설정했어요')));
+    }
+  }
+
   Future<void> _save() async {
     if (_nameController.text.trim().isEmpty) return;
+    if (_category == '제휴업체' && _college == null) {
+      ScaffoldMessenger.of(context)
+          .showSnackBar(const SnackBar(content: Text('단과대학을 선택해주세요')));
+      return;
+    }
     setState(() => _saving = true);
     try {
       await FirebaseFirestore.instance
@@ -2211,6 +2494,7 @@ class _EditPlaceScreenState extends State<EditPlaceScreen> {
         'name': _nameController.text.trim(),
         'nameNormalized': normalizeName(_nameController.text.trim()),
         'category': _category,
+        'college': _category == '제휴업체' ? _college : null,
         'tags': _selectedTags.toList(),
         'naverMapUrl': _mapUrlController.text.trim().isEmpty
             ? null
@@ -2244,9 +2528,43 @@ class _EditPlaceScreenState extends State<EditPlaceScreen> {
             items: kCategories
                 .map((c) => DropdownMenuItem(value: c, child: Text(c)))
                 .toList(),
-            onChanged: (v) => setState(() => _category = v!),
+            onChanged: (v) => setState(() {
+              _category = v!;
+              if (_category != '제휴업체') _college = null;
+            }),
             decoration: const InputDecoration(labelText: '카테고리'),
           ),
+          if (_category == '제휴업체') ...[
+            const SizedBox(height: 14),
+            InkWell(
+              borderRadius: BorderRadius.circular(12),
+              onTap: _pickCollege,
+              child: Container(
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
+                decoration: BoxDecoration(
+                    color: AppColors.surfaceMuted,
+                    borderRadius: BorderRadius.circular(12)),
+                child: Row(
+                  children: [
+                    const Icon(Icons.school_outlined,
+                        size: 18, color: AppColors.inkFaint),
+                    const SizedBox(width: 8),
+                    Text(_college ?? '단과대학 선택 (필수)',
+                        style: T.body(
+                            size: 14,
+                            color: _college == null
+                                ? AppColors.inkFaint
+                                : AppColors.ink,
+                            w: FontWeight.w700)),
+                    const Spacer(),
+                    const Icon(Icons.chevron_right,
+                        size: 18, color: AppColors.inkFaint),
+                  ],
+                ),
+              ),
+            ),
+          ],
           const SizedBox(height: 14),
           TextField(
               controller: _nameController,
@@ -2311,6 +2629,19 @@ class _EditPlaceScreenState extends State<EditPlaceScreen> {
             label: Text(_locating
                 ? '위치 확인 중...'
                 : (_lat != null ? '지금 위치로 다시 등록하기' : '위치 등록하기')),
+          ),
+          const SizedBox(height: 8),
+          OutlinedButton.icon(
+            onPressed: _pickOnMap,
+            style: OutlinedButton.styleFrom(
+              foregroundColor: AppColors.ink,
+              side: const BorderSide(color: AppColors.divider),
+              padding: const EdgeInsets.symmetric(vertical: 13),
+              shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(12)),
+            ),
+            icon: const Icon(Icons.map_outlined, size: 18),
+            label: const Text('지도에서 직접 고르기'),
           ),
           if (_lat != null) ...[
             const SizedBox(height: 6),
@@ -2423,7 +2754,9 @@ class ReportsScreen extends StatelessWidget {
 /// ============================================================
 class AddPlaceScreen extends StatefulWidget {
   final String category;
-  const AddPlaceScreen({super.key, required this.category});
+  final String? initialCollege;
+  const AddPlaceScreen(
+      {super.key, required this.category, this.initialCollege});
 
   @override
   State<AddPlaceScreen> createState() => _AddPlaceScreenState();
@@ -2435,6 +2768,7 @@ class _AddPlaceScreenState extends State<AddPlaceScreen> {
   final _mapUrlController = TextEditingController();
   final _addressController = TextEditingController();
   late String _category = widget.category;
+  late String? _college = widget.initialCollege;
   double _taste = 4;
   double _value = 4;
   final Set<String> _selectedTags = {};
@@ -2504,6 +2838,30 @@ class _AddPlaceScreenState extends State<AddPlaceScreen> {
     }
   }
 
+  Future<void> _pickCollege() async {
+    final college = await Navigator.of(context).push<String>(
+        MaterialPageRoute(builder: (_) => const CollegePickerScreen()));
+    if (college != null) setState(() => _college = college);
+  }
+
+  Future<void> _pickOnMap() async {
+    final picked = await Navigator.of(context).push<latlong.LatLng>(
+        MaterialPageRoute(
+            builder: (_) => MapPickerScreen(
+                initial: _lat != null && _lng != null
+                    ? latlong.LatLng(_lat!, _lng!)
+                    : null)));
+    if (picked == null) return;
+    setState(() {
+      _lat = picked.latitude;
+      _lng = picked.longitude;
+    });
+    if (mounted) {
+      ScaffoldMessenger.of(context)
+          .showSnackBar(const SnackBar(content: Text('지도에서 고른 위치로 설정했어요')));
+    }
+  }
+
   static const _allTags = [
     '혼밥 가능',
     '단체 가능',
@@ -2527,6 +2885,11 @@ class _AddPlaceScreenState extends State<AddPlaceScreen> {
 
   Future<void> _save() async {
     if (_nameController.text.trim().isEmpty) return;
+    if (_category == '제휴업체' && _college == null) {
+      ScaffoldMessenger.of(context)
+          .showSnackBar(const SnackBar(content: Text('단과대학을 선택해주세요')));
+      return;
+    }
     final trimmedName = _nameController.text.trim();
 
     setState(() => _saving = true);
@@ -2573,6 +2936,7 @@ class _AddPlaceScreenState extends State<AddPlaceScreen> {
         'name': trimmedName,
         'nameNormalized': normalized,
         'category': _category,
+        'college': _category == '제휴업체' ? _college : null,
         'tags': _selectedTags.toList(),
         'tasteSum': _taste,
         'tasteCount': 1,
@@ -2621,9 +2985,43 @@ class _AddPlaceScreenState extends State<AddPlaceScreen> {
             items: kCategories
                 .map((c) => DropdownMenuItem(value: c, child: Text(c)))
                 .toList(),
-            onChanged: (v) => setState(() => _category = v!),
+            onChanged: (v) => setState(() {
+              _category = v!;
+              if (_category != '제휴업체') _college = null;
+            }),
             decoration: const InputDecoration(labelText: '카테고리'),
           ),
+          if (_category == '제휴업체') ...[
+            const SizedBox(height: 14),
+            InkWell(
+              borderRadius: BorderRadius.circular(12),
+              onTap: _pickCollege,
+              child: Container(
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
+                decoration: BoxDecoration(
+                    color: AppColors.surfaceMuted,
+                    borderRadius: BorderRadius.circular(12)),
+                child: Row(
+                  children: [
+                    const Icon(Icons.school_outlined,
+                        size: 18, color: AppColors.inkFaint),
+                    const SizedBox(width: 8),
+                    Text(_college ?? '단과대학 선택 (필수)',
+                        style: T.body(
+                            size: 14,
+                            color: _college == null
+                                ? AppColors.inkFaint
+                                : AppColors.ink,
+                            w: FontWeight.w700)),
+                    const Spacer(),
+                    const Icon(Icons.chevron_right,
+                        size: 18, color: AppColors.inkFaint),
+                  ],
+                ),
+              ),
+            ),
+          ],
           const SizedBox(height: 14),
           TextField(
               controller: _nameController,
@@ -2698,6 +3096,19 @@ class _AddPlaceScreenState extends State<AddPlaceScreen> {
                 : (_lat != null
                     ? '위치 등록됨 (다시 잡으려면 탭)'
                     : '지금 여기 위치(GPS)로 등록하기')),
+          ),
+          const SizedBox(height: 8),
+          OutlinedButton.icon(
+            onPressed: _pickOnMap,
+            style: OutlinedButton.styleFrom(
+              foregroundColor: AppColors.ink,
+              side: const BorderSide(color: AppColors.divider),
+              padding: const EdgeInsets.symmetric(vertical: 13),
+              shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(12)),
+            ),
+            icon: const Icon(Icons.map_outlined, size: 18),
+            label: const Text('지도에서 직접 고르기'),
           ),
           if (_lat == null) ...[
             const SizedBox(height: 6),
@@ -3006,6 +3417,88 @@ class _AuthScreenState extends State<AuthScreen> {
     }
   }
 
+  Future<void> _showResetPasswordDialog() async {
+    final controller =
+        TextEditingController(text: _emailController.text.trim());
+    bool sending = false;
+    String? dialogError;
+
+    await showDialog(
+      context: context,
+      builder: (ctx) {
+        return StatefulBuilder(builder: (ctx, setDialogState) {
+          Future<void> submit() async {
+            final email = controller.text.trim().toLowerCase();
+            if (!email.contains('@') || !email.contains('.')) {
+              setDialogState(() => dialogError = '올바른 이메일 형식을 입력해주세요');
+              return;
+            }
+            setDialogState(() {
+              sending = true;
+              dialogError = null;
+            });
+            try {
+              FirebaseAuth.instance.setLanguageCode('ko');
+              await FirebaseAuth.instance.sendPasswordResetEmail(email: email);
+              if (!ctx.mounted) return;
+              Navigator.of(ctx).pop();
+              if (!mounted) return;
+              ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+                  content: Text('$email 로 재설정 메일을 보냈어요.\n메일함을 확인해주세요.')));
+            } on FirebaseAuthException catch (e) {
+              setDialogState(() {
+                sending = false;
+                dialogError = friendlyAuthError(e);
+              });
+            } catch (e) {
+              setDialogState(() {
+                sending = false;
+                dialogError = '메일 발송에 실패했어요. 다시 시도해주세요';
+              });
+            }
+          }
+
+          return AlertDialog(
+            title: const Text('비밀번호 재설정'),
+            content: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text('가입하신 이메일 주소를 입력하면\n재설정 링크를 보내드려요.',
+                    style: T.body(size: 13, color: AppColors.inkFaint)),
+                const SizedBox(height: 14),
+                TextField(
+                  controller: controller,
+                  autofocus: true,
+                  keyboardType: TextInputType.emailAddress,
+                  inputFormatters: [
+                    FilteringTextInputFormatter.deny(RegExp(r'\s'))
+                  ],
+                  decoration: const InputDecoration(hintText: '이메일 주소'),
+                ),
+                if (dialogError != null) ...[
+                  const SizedBox(height: 10),
+                  Text(dialogError!,
+                      style: T.body(size: 12, color: AppColors.stamp)),
+                ],
+              ],
+            ),
+            actions: [
+              TextButton(
+                onPressed: sending ? null : () => Navigator.of(ctx).pop(),
+                child: const Text('취소'),
+              ),
+              ElevatedButton(
+                onPressed: sending ? null : submit,
+                child: Text(sending ? '전송 중...' : '메일 보내기'),
+              ),
+            ],
+          );
+        });
+      },
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -3035,15 +3528,15 @@ class _AuthScreenState extends State<AuthScreen> {
                 text: TextSpan(
                   style: T.heading(size: 27),
                   children: [
-                    const TextSpan(text: '먹고 싶다면\n'),
+                    const TextSpan(text: '아그들아..\n'),
                     TextSpan(
-                        text: '여기서 찾아요',
+                        text: '밥은 굶고 다니지 말자',
                         style: T.heading(size: 27, color: AppColors.coral)),
                   ],
                 ),
               ),
               const SizedBox(height: 8),
-              Text('한림대 주변 맛집 정보를 한눈에',
+              Text('광고 없습니다~',
                   style: T.body(size: 13, color: AppColors.inkFaint)),
               const SizedBox(height: 28),
               Row(
@@ -3148,8 +3641,7 @@ class _AuthScreenState extends State<AuthScreen> {
       const SizedBox(height: 12),
       Center(
         child: TextButton(
-          onPressed: () => ScaffoldMessenger.of(context)
-              .showSnackBar(const SnackBar(content: Text('준비 중인 기능이에요'))),
+          onPressed: _showResetPasswordDialog,
           child: RichText(
               text: TextSpan(
                   style: T.body(size: 12, color: AppColors.inkFaint),
@@ -3531,11 +4023,11 @@ class MyReviewsScreen extends StatelessWidget {
         stream: query.snapshots(),
         builder: (context, snapshot) {
           if (snapshot.hasError) {
+            debugPrint('Firestore 에러: ${snapshot.error}'); // 개발자용 로그
             return Center(
                 child: Padding(
                     padding: const EdgeInsets.all(20),
-                    child: Text(
-                        '색인 설정이 필요해요.\nFirestore 콘솔 에러 메시지의 링크를 눌러\n색인을 생성한 뒤 다시 시도해주세요.',
+                    child: Text('정보를 불러오지 못했어요.\n잠시 후 다시 시도해주세요.',
                         textAlign: TextAlign.center,
                         style: T.body(color: AppColors.inkFaint))));
           }
@@ -3592,11 +4084,11 @@ class MyPlacesScreen extends StatelessWidget {
         stream: query.snapshots(),
         builder: (context, snapshot) {
           if (snapshot.hasError) {
+            debugPrint('Firestore 에러: ${snapshot.error}'); // 개발자용 로그
             return Center(
                 child: Padding(
                     padding: const EdgeInsets.all(20),
-                    child: Text(
-                        '색인 설정이 필요해요.\nFirestore 콘솔 에러 메시지의 링크를 눌러\n색인을 생성한 뒤 다시 시도해주세요.',
+                    child: Text('정보를 불러오지 못했어요.\n잠시 후 다시 시도해주세요.',
                         textAlign: TextAlign.center,
                         style: T.body(color: AppColors.inkFaint))));
           }
@@ -3681,11 +4173,11 @@ class NotificationsScreen extends StatelessWidget {
         stream: query.snapshots(),
         builder: (context, snapshot) {
           if (snapshot.hasError) {
+            debugPrint('Firestore 에러: ${snapshot.error}'); // 개발자용 로그
             return Center(
                 child: Padding(
                     padding: const EdgeInsets.all(20),
-                    child: Text(
-                        '색인 설정이 필요해요.\nFirestore 콘솔 에러 메시지의 링크를 눌러\n색인을 생성한 뒤 다시 시도해주세요.',
+                    child: Text('정보를 불러오지 못했어요.\n잠시 후 다시 시도해주세요.',
                         textAlign: TextAlign.center,
                         style: T.body(color: AppColors.inkFaint))));
           }
